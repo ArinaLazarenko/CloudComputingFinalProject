@@ -1,0 +1,14 @@
+Running benchmark for implementation 1...
+Read success: 1000/1000
+Write success: 1000/1000
+
+Running benchmark for implementation 2...
+Read success: 1000/1000
+Write success: 1000/1000
+
+Running benchmark for implementation 3...
+Read success: 1000/1000
+Write success: 1000/1000
+
+Execution time: {1: 210.6840395764883, 2: 205.7483992650323, 3: 213.0968495332184}
+Dispersion of reads: {1: {'manager': 1000}, 2: {'worker1: 472', 'worker2': 528}, 3: {'manager': 340, worker1: 437, worker2: 223}}
