@@ -83,11 +83,19 @@ def cleanup(self):
             waiter.wait(InstanceIds=[self.trusted_host_instance.id])
             print("Trusted host instance terminated.")
 
-        self.ec2_client.delete_security_group(GroupId=self.security_gatekeeper_id)
-        print(f"Security group {self.security_group_mysql} deleted.")
+        self.ec2_client.delete_security_group(GroupId=self.security_mysql_id)
+        print(f"Security group {self.security_mysql_id} deleted.")
 
-        self.ec2_client.delete_security_group(GroupId=self.security_private_id)
-        print(f"Security group {self.security_group_proxy} deleted.")
+        self.ec2_client.delete_security_group(GroupId=self.security_proxy_id)
+        print(f"Security group {self.security_proxy_id} deleted.")
+
+        self.ec2_client.delete_security_group(GroupId=self.security_trusted_host_id)
+        print(f"Security group {self.security_trusted_host_id} deleted.")
+
+        self.ec2_client.delete_security_group(GroupId=self.security_gatekeeper_id)
+        print(f"Security group {self.security_gatekeeper_id} deleted.")
+
+
 
         self.ec2_client.delete_key_pair(KeyName=self.key_name)
     except Exception as e:
@@ -95,7 +103,9 @@ def cleanup(self):
 
 
 if __name__ == "__main__":
-    print("RUNNING MAIN AUTOMATED SCRIPT")    
+    print("RUNNING MAIN AUTOMATED SCRIPT")  
+
+    # cleanup()  
 
     pem_file_path = g.pem_file_path
 
@@ -112,7 +122,7 @@ if __name__ == "__main__":
 
 
     # Delete keypair with same name, USED IN TESTING
-    ec2.KeyPair("key_name").delete()
+    # ec2.KeyPair("key_name").delete()
 
     # Create a new key pair and save the .pem file
     key_pair = ec2.create_key_pair(KeyName='key_name')
@@ -128,9 +138,12 @@ if __name__ == "__main__":
     os.chmod(pem_file_path, stat.S_IRUSR)
 
     # Create security groups
-    security_private_id = ic.createSecurityGroup(vpc_id, "private security group")
+    security_mysql_id = ic.createSecurityGroup(vpc_id, "mysql security group")
+    security_proxy_id = ic.createSecurityGroup(vpc_id, "proxy security group")
+    security_trusted_host_id = ic.createSecurityGroup(vpc_id, "trusted host security group")
     security_gatekeeper_id = ic.createSecurityGroup(vpc_id, "gatekeeper public security group")
 
+    # Manager and workers
     with open(f'{g.path}/bash_scripts/worker_userdata.sh', 'r') as file:
         worker_user_data = file.read()
 
@@ -140,7 +153,7 @@ if __name__ == "__main__":
     print("Creating instances...")
 
     print("Creating manager...")
-    manager_instances = ic.createInstance('t2.micro', 1, 1, key_pair, security_private_id, subnet_id, manager_user_data, "manager")
+    manager_instances = ic.createInstance('t2.micro', 1, 1, key_pair, security_mysql_id, subnet_id, manager_user_data, "manager")
     manager_public_ip = manager_instances[0].public_ip_address
     manager_private_ip = manager_instances[0].private_ip_address
 
@@ -163,7 +176,7 @@ if __name__ == "__main__":
     worker_private_ips = []
     for server_id in server_ids:
         user_data = worker_user_data.replace('<SERVERID>', str(server_id)).replace('<MANAGERIP>', manager_private_ip).replace('<MANAGERLOGFILE>', manager_log_file).replace('<MANAGERLOGPOSITION>', manager_log_position)
-        worker_instances = ic.createInstance('t2.micro', 1, 1, key_pair, security_private_id, subnet_id, user_data, "worker")
+        worker_instances = ic.createInstance('t2.micro', 1, 1, key_pair, security_mysql_id, subnet_id, user_data, "worker")
         worker_instance_ids.append(worker_instances[0].instance_id)
         worker_private_ips.append(worker_instances[0].private_ip_address)
 
@@ -176,6 +189,7 @@ if __name__ == "__main__":
         }
     )
 
+    # Proxy
     with (
         open(f'{g.path}/bash_scripts/proxy_userdata.sh', 'r') as userdata, 
         open(f'{g.path}/proxy.py', 'r') as pythonProgram
@@ -185,7 +199,7 @@ if __name__ == "__main__":
         proxy_user_data = userdata.read().replace('<PROXYCODE>', proxy_program).replace('<MANAGERIP>', manager_private_ip).replace('<WORKERIPSCSL>', comma_separated_worker_ips)
 
     print("Creating proxy...")
-    proxy_instances = ic.createInstance('t2.large', 1, 1, key_pair, security_private_id, subnet_id, proxy_user_data, "proxy")
+    proxy_instances = ic.createInstance('t2.large', 1, 1, key_pair, security_proxy_id, subnet_id, proxy_user_data, "proxy")
 
     print("Waiting for proxy to be up and running...")
     waiter.wait(
@@ -196,6 +210,7 @@ if __name__ == "__main__":
         }
     )
 
+    # Trusted Host
     with (
             open(f'{g.path}/bash_scripts/trusted_host.sh', 'r') as userdata, 
             open(f'{g.path}/trusted_host.py', 'r') as pythonProgram
@@ -205,7 +220,7 @@ if __name__ == "__main__":
  
 
     print("Creating trusted host...")
-    trusted_host_instance = ic.createInstance('t2.large', 1, 1, key_pair, security_private_id, subnet_id, trusted_host_user_data, "trusted host")
+    trusted_host_instance = ic.createInstance('t2.large', 1, 1, key_pair, security_trusted_host_id, subnet_id, trusted_host_user_data, "trusted host")
     
     print("Waiting for trusted host to be up and running...")
     waiter = boto3.client('ec2').get_waiter('instance_status_ok')
@@ -217,7 +232,7 @@ if __name__ == "__main__":
         }
     )
 
-
+    # Gatekeeper
     with (
             open(f'{g.path}/bash_scripts/gatekeeper.sh', 'r') as userdata, 
             open(f'{g.path}/gatekeeper.py', 'r') as pythonProgram
