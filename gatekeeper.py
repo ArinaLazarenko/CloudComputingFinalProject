@@ -1,117 +1,55 @@
 from flask import Flask, request, jsonify
 import requests
+import logging
 import json
-
-# Load the Trusted Host IP from the JSON file
-with open('instance_ips.json', 'r') as f:
-    instance_ips = json.load(f)
-try:
-    trusted_host_ip = instance_ips["trusted_host"]["private_ip"]
-except KeyError:
-    raise RuntimeError("Trusted Host IP not found in instance_ips.json")
 
 app = Flask(__name__)
 
-# Define the hardcoded password (ideally, this should be set as an environment variable)
-GATEKEEPER_PASSWORD = "password"
+with open("instances_ips.json", "r") as f:
+        instance_ips = json.load(f)
+
+trusted_host_ip = instance_ips["trusted_host_ip"]
+
+TRUSTED_HOST_URL = f"http://{trusted_host_ip}:5000"
+
+# Logs configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("GatekeeperApp")
 
 '''
-Description: Middleware that checks for a valid password in the request headers before processing the request. 
-Denies access if the password is incorrect.
+Description: A simple health check route that responds with a confirmation message to indicate that the Trusted Host is running and accessible.
+Outputs: A plain text message "Trusted Host OK" with a status code of 200 indicating that the Trusted Host is operational.
 '''
-@app.before_request
-def authenticate():
-    # Check for the password in the headers
-    password = request.headers.get("X-Gatekeeper-Password")
-    if password != GATEKEEPER_PASSWORD:
-        # If password is incorrect, deny access
-        return jsonify({"status": "error", "error": "Unauthorized access"}), 403
+@app.route("/", methods=["GET"])
+def health_check():
+    logger.info("Health check requested")
+    return "Gatekeeper OK", 200
 
 '''
-Description: A route that handles POST requests to the `/directhit` endpoint. 
-It validates the request, forwards it to a Trusted Host's Direct Hit endpoint, 
-and returns the response from the Trusted Host.
-Inputs: 
-    data (dict) - The JSON body of the request, expected to contain:
-        - 'operation' (str) - The operation to perform.
-        - 'query' (str) - The query to be processed.
-Outputs: 
-    dict - The JSON response received from the Trusted Host's Direct Hit endpoint, along with the corresponding HTTP status code.
+Description: Validates the incoming POST request data, logs the information, and forwards the query to a trusted host. 
+Returns the response from the trusted host.
+Inputs: JSON body (dict) containing the query data to be validated and forwarded.
+Outputs: JSON response (dict) containing:
+        - The result of the query from the trusted host if successful.
+        - An error message if the request format is invalid or if an error occurs while forwarding the request.
 '''
-# Direct Hit Route
-@app.route('/directhit', methods=['POST'])
-def directhit():
-    print("\n\nReceived request IN GATEWAY (DIRECT HIT)\n\n")
-
+@app.route("/", methods=["POST"])
+def validate_and_forward():
+    # Basic data validation
     data = request.json
+    logger.info(f"Received data: {data}")
+    if not data or "query" not in data:
+        logger.warning("Invalid request format")
+        return jsonify({"error": "Invalid request format"}), 400
 
-    # Basic validation of the request
-    if 'operation' not in data or 'query' not in data:
-        return jsonify({"error": "Invalid request"}), 400
+    # Transmits the query to the trusted host
+    try:
+        response = requests.post(f"{TRUSTED_HOST_URL}/query", json=data)
+        logger.info(f"Response from trusted host: {response.status_code}")
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error forwarding request: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
-    # Forward request to Trusted Host's Direct Hit endpoint
-    trusted_host_url = f"http://{trusted_host_ip}:5001/directhit"
-    response = requests.post(trusted_host_url, json=data)
-
-    return response.json(), response.status_code
-
-
-'''
-Description: A route that handles POST requests to the `/random` endpoint. 
-It validates the request, forwards it to a Trusted Host's Random endpoint, 
-and returns the response from the Trusted Host.
-Inputs: 
-    data (dict) - The JSON body of the request, expected to contain:
-        - 'operation' (str) - The operation to perform.
-        - 'query' (str) - The query to be processed.
-Outputs: 
-    dict - The JSON response received from the Trusted Host's Random endpoint, along with the corresponding HTTP status code.
-'''
-# Random Route
-@app.route('/random', methods=['POST'])
-def random_pattern():
-    print("\n\nReceived request IN GATEWAY (RANDOM)\n\n")
-
-    data = request.json
-
-    # Basic validation of the request
-    if 'operation' not in data or 'query' not in data:
-        return jsonify({"error": "Invalid request"}), 400
-
-    # Forward request to Trusted Host's Random endpoint
-    trusted_host_url = f"http://{trusted_host_ip}:5001/random"
-    response = requests.post(trusted_host_url, json=data)
-
-    return response.json(), response.status_code
-
-
-'''
-Description: A route that handles POST requests to the `/custom` endpoint. 
-It validates the request, forwards it to a Trusted Host's Custom endpoint, 
-and returns the response from the Trusted Host.
-Inputs: 
-    data (dict) - The JSON body of the request, expected to contain:
-        - 'operation' (str) - The operation to perform.
-        - 'query' (str) - The query to be processed.
-Outputs: 
-    dict - The JSON response received from the Trusted Host's Custom endpoint, along with the corresponding HTTP status code.
-'''
-# Custom Route
-@app.route('/custom', methods=['POST'])
-def custom_pattern():
-    print("\n\nReceived request IN GATEWAY (CUSTOMIZED)\n\n")
-
-    data = request.json
-
-    # Basic validation of the request
-    if 'operation' not in data or 'query' not in data:
-        return jsonify({"error": "Invalid request"}), 400
-
-    # Forward request to Trusted Host's Custom endpoint
-    trusted_host_url = f"http://{trusted_host_ip}:5001/custom"
-    response = requests.post(trusted_host_url, json=data)
-
-    return response.json(), response.status_code
-
-if __name__ == '_main_':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
